@@ -1,0 +1,188 @@
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg configs/experiments/rlsfa_gtga_bhlr_bdp_neck/uavcb_rlsfa_gtga_bhlr_bdp_neck_yolo26m_1920_640.yaml \
+    > logs/uavcb_bdp_neck_p3_b32.log 2>&1 &
+  echo $! > pid/uavcb_bdp_neck_p3_b32.pid
+  tail -f logs/uavcb_bdp_neck_p3_b32.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_bdp_neck/yolo26m_UAVCB_CoarseFine_GTGA_BHLRv2_BDPNeck-P3_ADD_rgb1920_sem640_tir640_seed0_b32/weights/best.pt \
+    --split test \
+    --device 0 \
+    --batch 4 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_bdp_neck/yolo26m_UAVCB_CoarseFine_GTGA_BHLRv2_BDPNeck-P3_ADD_rgb1920_sem640_tir640_seed0_b32/weights/best.pt \
+    --split test \
+    --device 0 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25 \
+    --iou 0.70 \
+    --canvas 1200
+  
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python eval_alignment_iou_displacement.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_bdp_neck/yolo26m_UAVCB_CoarseFine_GTGA_BHLRv2_BDPNeck-P3_ADD_rgb1920_sem640_tir640_seed0_b32/weights/best.pt \
+    --device 4 \
+    --batch 4 \
+    --workers 4 \
+    --save-dir runs/alignment_iou_UAV-CB
+
+model:
+  # Use the normal centered+BHLR branch.
+  # Fine translation is controlled inside rlsfa_gtga_centered.
+  variant: rlsfa_gtga_centered_bhlr_v2
+  name: yolo26m
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  # ----------------------------------------------------------
+  # 1. Coarse-Fine alignment
+  # ----------------------------------------------------------
+  rlsfa_gtga_centered:
+    enabled: true
+    type: rlsfa_gtga_centered
+
+    reference_scale: 3
+    apply_scales: [3, 4, 5]
+    hidden_channels: 32
+
+    coarse_radius: 20
+    coarse_temperature: 0.10
+    use_targetness_for_correlation: true
+
+    # Fine translation: +/-2 P3 pixels
+    fine_translation_enabled: true
+    fine_translation_radius: 2
+    fine_translation_temperature: 0.05
+
+    anchor_power: 4.0
+    moment_power: 2.0
+
+    # Keep fixed for the clean Neck experiment
+    local_window_sigma: 0.10
+
+    moment_border_margin: 2
+    sigma_min: 0.005
+    scale_min: 0.50
+    scale_max: 3.00
+
+    padding_mode: border
+    align_corners: true
+
+    reliability_gate:
+      enabled: false
+
+  # ----------------------------------------------------------
+  # 2. BHLR-v2: recover high-resolution RGB detail at P3
+  # ----------------------------------------------------------
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+
+  # ----------------------------------------------------------
+  # 3. NEW: BDP-Neck
+  #
+  # D3 = RGB_P3_after_BHLR - RGB_P3_before_BHLR
+  # NeckP3' = NeckP3 + gain * Gate(NeckP3) * Proj(D3)
+  # ----------------------------------------------------------
+  bdp_neck:
+    enabled: true
+    scale: 3
+    semantic_gate: true
+
+    # gain = max_gain * tanh(gain_raw)
+    # gain_raw starts at 0 -> exact original Neck at initialization.
+    max_gain: 0.25
+
+# ============================================================
+# Dataset
+# ============================================================
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+# ============================================================
+# Training
+# ============================================================
+train:
+  device: "0,5"
+  batch: 32
+  batch_mode: global
+  workers: 4
+
+  epochs: 300
+
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  alignment:
+    enabled: true
+    lambda_alignment: 0.20
+    lambda_anchor: 1.00
+    lambda_coarse: 1.00
+    lambda_scale: 1.00
+    lambda_targetness: 0.20
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+    clamp_gt_translation: true
+
+output:
+  project: runs/rlsfa_gtga_bhlr_bdp_neck
+  name: yolo26m_UAVCB_CoarseFine_GTGA_BHLRv2_BDPNeck-P3_ADD_rgb1920_sem640_tir640_seed0_b32

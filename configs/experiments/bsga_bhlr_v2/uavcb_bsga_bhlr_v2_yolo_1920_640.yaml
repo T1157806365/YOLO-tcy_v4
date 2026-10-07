@@ -1,0 +1,147 @@
+# ============================================================
+# BSGA + BHLR-v2 | UAV-CB | YOLO26s
+# BSGA = BBox-Supervised Geometric Alignment
+# RGB high 1920 / RGB semantic 640 / TIR 640
+# ============================================================
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  mkdir -p logs pid
+  nohup python -u train_bsga_bhlr_v2.py \
+    --cfg /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/experiments/bsga_bhlr_v2/uavcb_bsga_bhlr_v2_yolo_1920_640.yaml \
+    > logs/uavcb_BSGA_P3_BHLRv2_P3_yolo26s.log 2>&1 &
+  echo $! > pid/uavcb_BSGA_P3_BHLRv2_P3_yolo26s.pid
+  tail -f logs/uavcb_BSGA_P3_BHLRv2_P3_yolo26s.log
+
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python visualize_bsga_bhlr_v2_internal.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/bsga_bhlr_v2/yolo26s_UAVCB_BSGA-P3_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add/weights/best.pt \
+    --split test \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --device 5 \
+    --fusion auto
+
+model:
+  name: yolo26s
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  # ==========================================================
+  # Innovation 1: BSGA
+  # BBox-Supervised Geometric Alignment
+  # ==========================================================
+  bsga:
+    enabled: true
+    type: bsga
+
+    # Use P3 because tiny UAVs retain more spatial detail there.
+    reference_scale: 3
+
+    # One normalized global geometry is propagated to P3/P4/P5.
+    apply_scales: [3, 4, 5]
+
+    # Geometry head.
+    hidden_channels: 32
+    pooled_size: 4
+
+    # Forward TIR->RGB geometry:
+    # p = 0.5 + scale * (q - 0.5) + translation
+    # Exact identity at initialization.
+    max_translation_norm: 0.75
+    scale_min: 0.25
+    scale_max: 4.0
+
+    # Important decoupling:
+    # geometry supervision trains the geometry head only;
+    # detector gradients do not rewrite the geometry predictor.
+    detach_geometry_features: true
+    detach_geometry_for_warp: true
+
+    padding_mode: border
+    align_corners: true
+
+  # ==========================================================
+  # Innovation 2: BHLR-v2
+  # ==========================================================
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+
+    # Deliberately no fabricated BSGA confidence/support map.
+    # BHLR receives the BSGA-aligned TIR feature and uses its own selector.
+    guidance_mode: none
+
+
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml
+
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+train:
+  device: "5"
+
+  batch: 16
+  batch_mode: global
+  workers: 4
+  epochs: 300
+
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  bsga:
+    enabled: true
+
+    # Moderate outer weight. This avoids the geometry branch dominating
+    # the trainer's global gradient clipping while still giving direct
+    # supervision to the small geometry head.
+    lambda_bsga: 1.0
+
+    # Direct bbox-derived supervision terms.
+    lambda_translation: 2.0
+    lambda_scale: 1.0
+    lambda_aligned_iou: 1.0
+    smooth_l1_beta: 0.02
+
+output:
+  project: runs/bsga_bhlr_v2
+  name: yolo26s_UAVCB_BSGA-P3_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add

@@ -1,0 +1,269 @@
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg configs/experiments/gsr/uavcb_gsr_v3_yolo26m_1920_640.yaml \
+    > logs/uavcb_gsr_v3.log 2>&1 &
+  echo $! > pid/uavcb_gsr_v3.pid
+  tail -f logs/uavcb_gsr_v3.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_coarsefine_gmls/yolo26m_UAVCB_TIR2RGB_RLSFA-CoarseFine_GTGA-Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_gmls/weights/best.pt \
+    --split test \
+    --device 2 \
+    --batch 4 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_coarsefine_gmls/yolo26m_UAVCB_TIR2RGB_RLSFA-CoarseFine_GTGA-Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_gmls/weights/best.pt \
+    --split test \
+    --device 2 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25 \
+    --iou 0.70 \
+    --canvas 1200
+  
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python eval_alignment_iou_displacement_GSR.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_coarsefine_gmls/yolo26m_UAVCB_TIR2RGB_RLSFA-CoarseFine_GTGA-Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_gmls/weights/best.pt \
+    --device 2 \
+    --batch 4 \
+    --workers 4 \
+    --save-dir runs/alignment_iou_UAV-CB
+
+model:
+  variant: rlsfa_gtga_centered_bhlr_v2
+  name: yolo26m
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  # ----------------------------------------------------------
+  # RLSFA coarse translation + fine residual translation
+  # + Local-GTGA centered scale
+  # ----------------------------------------------------------
+  rlsfa_gtga_centered:
+    enabled: true
+    type: rlsfa_gtga_centered
+
+    reference_scale: 3
+    apply_scales: [3, 4, 5]
+    hidden_channels: 32
+
+    # Existing coarse translation
+    coarse_radius: 20
+    coarse_temperature: 0.10
+    use_targetness_for_correlation: true
+
+    # ========================================================
+    # DMLS-Align v1: ONLY change in the alignment estimator.
+    #
+    # Full 41x41 correlation is still computed.
+    # argmax selects only the dominant basin center.
+    # Final coarse offset = LOCAL soft expectation in 7x7 basin.
+    # ========================================================
+    coarse_local_soft_enabled: false
+
+    # 3 -> 7x7 basin around the dominant mode.
+    # First clean experiment: keep exactly 3.
+    coarse_local_radius: 3
+
+    # Use the same temperature as the historical coarse softmax.
+    coarse_local_temperature: 0.10
+
+    # ========================================================
+    # GMLS-Align v1
+    # Candidate 0 : historical GLOBAL soft offset
+    # Candidate 1-3: three distinct LOCAL-soft modes
+    # Final coarse offset: target-aware SOFT aggregation.
+    # ========================================================
+    coarse_gmls_enabled: false
+
+    # Three distinct correlation modes.
+    coarse_gmls_topk: 3
+
+    # Suppress adjacent maxima so one physical mode is not repeated.
+    coarse_gmls_nms_radius: 4
+
+    # Candidate-level soft aggregation temperature.
+    coarse_gmls_aggregation_temperature: 0.12
+
+    # Stability prior: 60% prior mass to historical Global Soft,
+    # 40% shared by local modes according to their correlation mass.
+    coarse_gmls_global_prior: 0.60
+
+    # Candidate evidence = 0.65 * localized feature consistency
+    #                    + 0.35 * targetness soft-IoU.
+    coarse_gmls_feature_weight: 0.65
+    coarse_gmls_target_weight: 0.35
+
+    # ========================================================
+    # RG-DMLS v2
+    # ========================================================
+    coarse_rg_dmls_enabled: true
+
+    # Independent path routing; false means original RG-DMLS v2.
+    gsr_enabled: true
+    gsr_route_margin: 0.05
+    gsr_path_hidden: 32
+    gsr_global_freeze: false
+    # Set these to your OWN two checkpoint paths before fresh training.
+    # null = branch is NOT warm-started (does not reproduce old Global).
+    gsr_global_checkpoint: null
+    gsr_rg_checkpoint: null
+
+    # Mode-1 = DMLS base; Mode-2/3 = rescue candidates.
+    coarse_rg_topk: 3
+    coarse_rg_nms_radius: 4
+
+    # Candidate descriptor evidence.
+    coarse_rg_feature_weight: 0.65
+    coarse_rg_target_weight: 0.35
+    coarse_rg_reliability_hidden: 32
+
+    # Rescue branch.
+    coarse_rg_alternative_temperature: 0.08
+    coarse_rg_gate_temperature: 0.05
+    coarse_rg_gate_margin: 0.20
+    coarse_rg_gate_max: 1.00
+
+    # NEW: small local residual translation search
+    fine_translation_enabled: true
+    fine_translation_radius: 2
+    fine_translation_temperature: 0.05
+
+    # Existing Local-GTGA scale
+    anchor_power: 4.0
+    moment_power: 2.0
+    local_window_sigma: 0.10
+
+    moment_border_margin: 2
+    sigma_min: 0.005
+    scale_min: 0.50
+    scale_max: 3.00
+
+    padding_mode: border
+    align_corners: true
+
+    reliability_gate:
+      enabled: false
+
+  # ----------------------------------------------------------
+  # BHLR-v2: unchanged
+  # ----------------------------------------------------------
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+
+  # ----------------------------------------------------------
+  # DUCF disabled: use ADD fusion
+  # ----------------------------------------------------------
+  ducf:
+    enabled: false
+    scales: [3]
+    hidden_channels: 64
+    use_target_support: true
+    max_consensus_ratio: 0.10
+    max_innovation_ratio: 0.15
+
+# ============================================================
+# Dataset
+# ============================================================
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+# ============================================================
+# Training
+# ============================================================
+train:
+  device: "0,5"
+  batch: 16
+  batch_mode: global
+  workers: 4
+  epochs: 300
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  alignment:
+    enabled: true
+    lambda_alignment: 0.20
+    lambda_anchor: 1.00
+    lambda_coarse: 1.00
+    lambda_scale: 1.00
+    lambda_targetness: 0.20
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+    clamp_gt_translation: true
+
+    # RG-DMLS bbox-supervised candidate reliability.
+    lambda_candidate_reliability: 0.25
+    lambda_candidate_ranking: 0.10
+    lambda_rescue_gate: 0.10
+
+    # Independent full-geometry and path-quality supervision.
+    lambda_gsr_global_geometry: 0.50
+    lambda_gsr_rg_geometry: 0.50
+    lambda_gsr_path_quality: 0.25
+    lambda_gsr_path_ranking: 0.10
+    gsr_path_ranking_margin: 0.10
+    gsr_path_quality_gap: 0.05
+
+    candidate_rank_margin: 0.20
+    candidate_quality_gap: 0.05
+    rescue_quality_margin: 0.05
+    rescue_target_temperature: 0.05
+
+output:
+  project: runs/rlsfa_gtga_bhlr_gsr_v3
+  name: yolo26m_UAVCB_GSRv3_GlobalSafe_RGRescue_Fine_Scale_BHLRv2_ADD_seed0

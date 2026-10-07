@@ -1,0 +1,187 @@
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg  /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/experiments/rlsfa_gtga_bhlr_ducf_safe_v2/uavcb_rlsfa_gtga_bhlr_ducf_safe_v2_yolo26m_1920_640.yaml\
+    > logs/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_26m_v6_0.5-3.log 2>&1 &
+  echo $! \
+    > pid/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_26m_v6_0.5-3.pid
+  tail -f logs/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_26m_v6_0.5-3.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_ducf_safe_v2/yolo26m_UAVCB_TIR2RGB_BHLRv2_DUCFSAFEv2-P3_rgb1920_sem640_tir640_seed0/weights/best.pt \
+    --split test \
+    --device 3 \
+    --batch 8 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python visualize_ducf_safe_v2_internal.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_ducf_safe_v2/yolo26m_UAVCB_TIR2RGB_BHLRv2_DUCFSAFEv2-P3_rgb1920_sem640_tir640_seed0/weights/best.pt \
+    --split test \
+    --device 3 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25
+    --iou 0.70 \
+    --canvas 1200
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python compare_two_models_by_uav_scale.py \
+    --baseline-weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v2/runs/baseline/yolo26m_UAVCB_BASELINE_rgb1920_sem640_tir640_seed0_add/weights/best.pt \
+    --bhlr-weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_ducf_safe_v2/yolo26m_UAVCB_TIR2RGB_BHLRv2_DUCFSAFEv2-P3_rgb1920_sem640_tir640_seed0/weights/best.pt \
+    --model1-name Baseline \
+    --model2-name Ours \
+    --model1-loader baseline \
+    --model2-loader factory \
+    --model1-input semantic \
+    --model2-input dualres \
+    --split test \
+    --rgb /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml \
+    --tir /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml \
+    --rgb-imgsz 1920 \
+    --rgb-semantic-imgsz 640 \
+    --tir-imgsz 640 \
+    --batch 8 \
+    --workers 4 \
+    --device 5 \
+    --save-dir runs/scale_compare/Baseline_vs_Ours
+
+model:
+  variant: rlsfa_gtga_centered_bhlr_ducf_safe_v2
+  name: yolo26m
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  # ----------------------------------------------------------
+  # EXACT effective defaults of the previous working centered alignment
+  # ----------------------------------------------------------
+  rlsfa_gtga_centered:
+    enabled: true
+    type: rlsfa_gtga_centered
+    reference_scale: 3
+    apply_scales: [3, 4, 5]
+    hidden_channels: 32
+    coarse_radius: 20
+    coarse_temperature: 0.10
+    use_targetness_for_correlation: true
+    anchor_power: 4.0
+    moment_power: 2.0
+    local_window_sigma: 0.10
+    moment_border_margin: 2
+    sigma_min: 0.005
+    scale_min: 0.50
+    scale_max: 3.00
+    padding_mode: border
+    align_corners: true
+
+    # Historical effective state was OFF because the misspelled block was
+    # ignored by the original factory. Keep it OFF for a clean fusion ablation.
+    reliability_gate:
+      enabled: false
+
+  # ----------------------------------------------------------
+  # Existing BHLR-v2: unchanged
+  # ----------------------------------------------------------
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+
+  # ----------------------------------------------------------
+  # DUCF-Safe v2
+  # ----------------------------------------------------------
+  ducf:
+    enabled: true
+
+    # FIRST STABILITY RUN: P3 only.
+    # After this is stable, ablate [3,4].
+    scales: [3]
+    hidden_channels: 64
+    use_target_support: true
+
+    # Raw ADD is never gated. DUCF can only add bounded corrections.
+    max_consensus_ratio: 0.10
+    max_innovation_ratio: 0.15
+
+# ============================================================
+# Dataset
+# ============================================================
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+# ============================================================
+# Training: unchanged
+# ============================================================
+train:
+  device: "3,4"
+  batch: 16
+  batch_mode: global
+  workers: 4
+  epochs: 300
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  alignment:
+    enabled: true
+    lambda_alignment: 0.20
+    lambda_anchor: 1.00
+    lambda_coarse: 1.00
+    lambda_scale: 1.00
+    lambda_targetness: 0.20
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+    clamp_gt_translation: true
+
+output:
+  project: runs/rlsfa_gtga_bhlr_ducf_safe_v2
+  name: yolo26m_UAVCB_TIR2RGB_BHLRv2_DUCFSAFEv2-P3_rgb1920_sem640_tir640_seed0_0.5-3

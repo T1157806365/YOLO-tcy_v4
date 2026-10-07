@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# Logs / PID
+logs/
+pid/
+*.log
+
+# Training outputs
+runs/
+outputs/
+output/
+work_dirs/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+
+# Dataset / large data
+datasets/
+data/
+*.7z
+*.zip
+*.tar
+*.tar.gz
+
+# Temporary
+tmp/
+temp/
+.cache/
+.DS_Store
+Thumbs.db
+
+# WandB
+wandb/
+
+# ============================
+# YOLO-tcy-v4 local artifacts
+# ============================
+runs/
+logs/
+pid/
+work_dirs/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+
+.DS_Store
+.vscode/
+.idea/
+
+wandb/

@@ -1,0 +1,177 @@
+# ============================================================
+# RLSFA coarse translation + GTGA anisotropic scale
+# + alignment-guided BHLR-v2 | UAV-CB | YOLO26s
+#
+# RGB high     : 1920
+# RGB semantic : 640
+# TIR          : 640
+# ============================================================
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/experiments/rlsfa_gtga_bhlr_v2/uavcb_rlsfa_gtga_bhlr_v2_yolo26s_1920_640.yaml \
+    > logs/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_00.log 2>&1 &
+  echo $! \
+    > pid/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_00.pid
+  tail -f logs/uavcb_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_00.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_v2/yolo26s_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add/weights/best.pt \
+    --split test \
+    --device 5 \
+    --batch 8 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python visualize_rlsfa_gtga_bhlr_v2_internal.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_v2/yolo26s_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add/weights/best.pt \
+    --split test \
+    --device 5 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3
+  python compare_baseline_bhlr_by_uav_scale.py \
+    --baseline-weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v2/runs/baseline/yolo26s_UAVCB_BASELINE_rgb1920_sem640_tir640_seed0_add_1_1_test/weights/best.pt \
+    --bhlr-weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/runs/rlsfa_gtga_bhlr_v2/yolo26s_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add/weights/best.pt \
+    --split test \
+    --device 5 \
+    --batch 4 \
+    --workers 4 \
+    --save-dir runs/scale_compare_baseline_vs_bhlr
+
+model:
+  variant: rlsfa_gtga_bhlr_v2
+  name: yolo26s
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  rlsfa_gtga:
+    enabled: true
+    type: rlsfa_gtga_scale
+
+    reference_scale: 3
+    apply_scales: [3, 4, 5]
+    hidden_channels: 32
+
+    # Proven RLSFA coarse translation.
+    coarse_radius: 20
+    coarse_temperature: 0.10
+    use_targetness_for_correlation: true
+
+    # UAV anchor from coarse targetness.
+    anchor_power: 4.0
+
+    # Local-GTGA scale around c_R / c_T.
+    moment_power: 2.0
+    local_window_sigma: 0.10
+    moment_border_margin: 2
+    sigma_min: 0.005
+
+    # Inverse-sampling anisotropic scale clamp.
+    scale_min: 0.50
+    scale_max: 2.00
+
+    padding_mode: border
+    align_corners: true
+
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+
+    # Alignment-localized joint support enters BHLR selector.
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+
+
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v3/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+train:
+  device: "5"
+  batch: 16
+  batch_mode: global
+  workers: 4
+  epochs: 300
+
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  alignment:
+    enabled: true
+    lambda_alignment: 0.20
+
+    # c_R must follow the UAV center.
+    lambda_anchor: 1.00
+
+    # c_T-c_R comes from the proven coarse correlation.
+    lambda_coarse: 1.00
+
+    # Local GTGA anisotropic scale supervision.
+    lambda_scale: 1.00
+
+    # RGB/TIR Gaussian target maps + coarse targetness.
+    lambda_targetness: 0.20
+
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+
+    # Soft Gaussian supervision for GTGA target heads.
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+
+    clamp_gt_translation: true
+
+output:
+  project: runs/rlsfa_gtga_bhlr_v2
+  name: yolo26s_UAVCB_RLSFA-Coarse_GTGA-Scale_CenteredPivot_BHLRv2-P3_rgb1920_sem640_tir640_seed0_add_00
