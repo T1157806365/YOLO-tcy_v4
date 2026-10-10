@@ -3,12 +3,10 @@ BDP-Neck v1
 ===========
 BHLR Detail-Preserving Neck for RGB-T UAV detection.
 
-Purpose
--------
 BHLR injects high-resolution RGB detail into backbone P3. Standard YOLO
 FPN/PAN can dilute that increment during repeated multi-scale interactions.
 
-BDP-Neck therefore preserves only the *increment actually introduced by BHLR*:
+BDP-Neck preserves only the increment actually introduced by BHLR:
 
     D3 = P3_BHLR - P3_raw
 
@@ -19,15 +17,15 @@ and injects it into the final Neck P3 immediately before Detect:
 Properties
 ----------
 - P3 only.
-- No new auxiliary loss.
-- Semantic spatial gate is optional.
+- No auxiliary loss.
+- Optional semantic spatial gate.
 - Bounded residual gain.
 - gain_raw is initialized to 0 -> exact identity at initialization.
 """
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -90,9 +88,7 @@ class BDPNeckP3(nn.Module):
 
         # Exact identity initialization:
         # gain = max_gain * tanh(0) = 0.
-        self.gain_raw = nn.Parameter(
-            torch.zeros((), dtype=torch.float32)
-        )
+        self.gain_raw = nn.Parameter(torch.zeros((), dtype=torch.float32))
 
     def current_gain(self) -> torch.Tensor:
         return self.max_gain * torch.tanh(self.gain_raw)

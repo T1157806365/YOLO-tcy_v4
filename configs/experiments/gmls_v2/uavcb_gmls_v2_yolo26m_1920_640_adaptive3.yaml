@@ -11,7 +11,7 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python val_rlsfa_gtga_bhlr_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_adaptive/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_adaptive_0/weights/best.pt \
     --split test \
     --device 1 \
     --batch 4 \
@@ -34,7 +34,7 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python eval_alignment_iou_displacement_GMLS_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_adaptive/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_adaptive_0/weights/best.pt \
     --device 1 \
     --batch 4 \
     --workers 4 \

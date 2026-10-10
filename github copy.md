@@ -7,6 +7,6 @@ git remote -v
 git switch -c backup-20261009
 # 提交当前所有未被 .gitignore 排除的修改 
 git add . 
-git commit -m "Backup YOLO-tcy_v4 bhlrnew_adaptive 2026-10-9" 
+git commit -m "Backup YOLO-tcy_v4 bhlrnew_bdp_v1 2026-10-9" 
 # 上传新分支到 GitHub 
 git push -u origin backup-20261009

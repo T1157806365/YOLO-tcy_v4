@@ -1171,7 +1171,8 @@ class RLSFAGTGAScaleUnit(nn.Module):
         gmls_v2_quality_hidden: int = 32,
         gmls_v2_route_logit_margin: float = 0.20,
 
-        # Adaptive versions of: DMLS T, Fine T, Local-GTGA sigma.
+        # Adaptive versions of Fine T and Local-GTGA sigma only.
+        # GMLS/DMLS coarse readout stays EXACTLY on the proven fixed parameters.
         adaptive_parameters_cfg: Optional[Dict[str, Any]] = None,
 
         fine_translation_enabled: bool = False,
@@ -1242,23 +1243,13 @@ class RLSFAGTGAScaleUnit(nn.Module):
         self.adaptive_hidden_channels = max(4, int(acfg.get('hidden_channels', 16)))
         self.adaptive_detach_statistics = bool(acfg.get('detach_statistics', True))
 
-        dcfg = dict(acfg.get('dmls_temperature', {}) or {})
         fcfg = dict(acfg.get('fine_temperature', {}) or {})
         scfg = dict(acfg.get('local_window_sigma', {}) or {})
 
+        # Deliberately disabled in this variant.  Keeping the attribute avoids
+        # breaking debug/checkpoint helper code, but no parameters are created.
+        # Both GMLS and DMLS use the historical fixed coarse_local_temperature.
         self.adaptive_dmls_temperature_head = None
-        if (
-            self.adaptive_parameters_enabled
-            and bool(dcfg.get('enabled', True))
-            and (self.coarse_gmls_enabled or self.coarse_local_soft_enabled)
-        ):
-            self.adaptive_dmls_temperature_head = AdaptiveBoundedScalar(
-                in_channels=3,
-                hidden_channels=self.adaptive_hidden_channels,
-                min_value=float(dcfg.get('min', 0.03)),
-                max_value=float(dcfg.get('max', 0.15)),
-                init_value=float(dcfg.get('init', self.coarse_local_temperature)),
-            )
 
         self.adaptive_fine_temperature_head = None
         if (
@@ -1345,23 +1336,15 @@ class RLSFAGTGAScaleUnit(nn.Module):
         )
 
         # --------------------------------------------------------------
-        # Per-image adaptive DMLS temperature and Local-GTGA window sigma.
-        # Their heads are baseline-preserving, therefore a fresh model starts
-        # exactly at the historical fixed values 0.10 / 0.10.
+        # Fixed coarse + adaptive scale-window policy.
+        #
+        # IMPORTANT: GMLS and DMLS retain the EXACT proven fixed local
+        # temperature.  Only the later Fine stage and Local-GTGA window are
+        # adaptive in this variant.  This prevents the adaptive heads from
+        # perturbing the coarse correlation curriculum / GMLS candidate set.
         # --------------------------------------------------------------
         coarse_stats = correlation_statistics(coarse_corr_logits)
-        coarse_stats_for_head = (
-            coarse_stats.detach()
-            if self.adaptive_detach_statistics
-            else coarse_stats
-        )
-
-        if self.adaptive_dmls_temperature_head is not None:
-            coarse_local_temperature_used = self.adaptive_dmls_temperature_head(
-                coarse_stats_for_head
-            )
-        else:
-            coarse_local_temperature_used = self.coarse_local_temperature
+        coarse_local_temperature_used = self.coarse_local_temperature
 
         # Target-spread descriptor is available before Local-GTGA and therefore
         # does not create a circular dependence on local_window_sigma.
@@ -1412,7 +1395,7 @@ class RLSFAGTGAScaleUnit(nn.Module):
                 logits=coarse_corr_logits,
                 search_radius=self.coarse_radius,
                 basin_radius=self.coarse_local_radius,
-                temperature=coarse_local_temperature_used,
+                temperature=self.coarse_local_temperature,
             )
             coarse_offset_dmls = coarse_offset
 
@@ -1433,12 +1416,13 @@ class RLSFAGTGAScaleUnit(nn.Module):
                 mode_topk=self.coarse_gmls_topk,
                 mode_nms_radius=self.coarse_gmls_nms_radius,
                 local_basin_radius=self.coarse_local_radius,
-                local_temperature=coarse_local_temperature_used,
+                # Keep GMLS EXACTLY on the proven fixed coarse settings.
+                local_temperature=self.coarse_local_temperature,
                 aggregation_temperature=self.coarse_gmls_aggregation_temperature,
                 global_prior=self.coarse_gmls_global_prior,
                 feature_weight=self.coarse_gmls_feature_weight,
                 target_weight=self.coarse_gmls_target_weight,
-                local_window_sigma=local_window_sigma_used,
+                local_window_sigma=self.local_window_sigma,
                 padding_mode=self.padding_mode,
                 align_corners=self.align_corners,
             )
@@ -1623,6 +1607,8 @@ class RLSFAGTGAScaleUnit(nn.Module):
             'coarse_local_radius': self.coarse_local_radius,
             'coarse_local_temperature': self.coarse_local_temperature,
             'adaptive_parameters_enabled': self.adaptive_parameters_enabled,
+            'adaptive_coarse_enabled': False,
+            # Compatibility key: fixed in this variant (not adaptive).
             'adaptive_coarse_local_temperature': (
                 coarse_local_temperature_used
                 if torch.is_tensor(coarse_local_temperature_used)
@@ -1981,6 +1967,7 @@ class RLSFAGTGACenteredAlignment(BaseAlignment):
             'coarse_local_soft_enabled': bool(self.unit.coarse_local_soft_enabled),
             'coarse_local_radius': int(self.unit.coarse_local_radius),
             'adaptive_parameters_enabled': bool(self.unit.adaptive_parameters_enabled),
+            'adaptive_coarse_enabled': False,
             'adaptive_coarse_local_temperature': geometry['adaptive_coarse_local_temperature'],
             'adaptive_fine_translation_temperature': geometry['adaptive_fine_translation_temperature'],
             'adaptive_local_window_sigma': geometry['adaptive_local_window_sigma'],

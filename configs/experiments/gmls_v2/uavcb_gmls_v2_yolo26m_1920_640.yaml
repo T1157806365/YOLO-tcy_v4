@@ -4,9 +4,9 @@ traincc:
   mkdir -p logs pid
   nohup python -u train_rlsfa_gtga_bhlr_v2.py \
     --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640.yaml \
-    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_coarse_local_temperature0.075.log 2>&1 &
-  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_coarse_local_temperature0.075.pid
-  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_coarse_local_temperature0.075.log
+    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew 2>&1 &
+  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew.pid
+  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew.log
 
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
@@ -79,7 +79,7 @@ model:
     coarse_local_radius: 6
 
     # Use the same temperature as the historical coarse softmax.
-    coarse_local_temperature: 0.075
+    coarse_local_temperature: 0.10
     #原为0.10
     # ========================================================
     # GMLS v2 (GMLS primary + DMLS bbox-supervised correction)
@@ -147,17 +147,6 @@ model:
     guide_channels: 24
     guidance_mode: alignment
     detach_alignment_guidance: true
-
-  # ----------------------------------------------------------
-  # DUCF disabled: use ADD fusion
-  # ----------------------------------------------------------
-  ducf:
-    enabled: false
-    scales: [3]
-    hidden_channels: 64
-    use_target_support: true
-    max_consensus_ratio: 0.10
-    max_innovation_ratio: 0.15
 
 # ============================================================
 # Dataset
@@ -232,4 +221,4 @@ loss:
 
 output:
   project: runs/rlsfa_gtga_bhlr_gmls_v2
-  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_coarse_local_temperature0.075
+  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew
