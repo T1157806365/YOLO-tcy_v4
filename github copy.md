@@ -4,9 +4,9 @@ git status
 git branch --show-current 
 git remote -v 
 # 基于当前代码创建新的备份分支 
-git switch -c backup-20261009
+git switch -c backup-20261012
 # 提交当前所有未被 .gitignore 排除的修改 
 git add . 
-git commit -m "Backup YOLO-tcy_v4 bhlrnew_bdp_v1 2026-10-9" 
+git commit -m "Backup YOLO-tcy_v4 bhlrnew_bdp_v2 2026-10-12" 
 # 上传新分支到 GitHub 
-git push -u origin backup-20261009
+git push -u origin backup-20261012

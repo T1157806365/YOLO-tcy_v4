@@ -308,6 +308,65 @@ def build_model_from_config(
     # --------------------------------------------------------
     # 1. Centered RLSFA + Local-GTGA + BHLR-v2
     # --------------------------------------------------------
+
+    # --------------------------------------------------------
+    # BDP-Neck v2
+    # Fixed centered alignment + BHLR + ADD + internal P3
+    # detail fusion BEFORE the native P3 refinement block.
+    # --------------------------------------------------------
+    elif variant in {
+        "rlsfa_gtga_centered_bhlr_bdp_neck_v2",
+        "rlsfa_gtga_centered_bdp_neck_v2",
+    }:
+        from models.rgbt_rlsfa_gtga_centered_bhlr_bdp_neck_v2_model import (
+            RGBTRLSFAGTGACenteredBHLRBDPNeckV2DetectionModel,
+        )
+
+        align_cfg = dict(
+            model_cfg.get(
+                "rlsfa_gtga_centered",
+                model_cfg.get("alignment", {}),
+            )
+            or {}
+        )
+
+        align_loss_cfg = dict(
+            loss_cfg.get(
+                "alignment",
+                loss_cfg.get("rlsfa_gtga_centered", {}),
+            )
+            or {}
+        )
+
+        bhlr_cfg = dict(model_cfg.get("bhlr", {}) or {})
+        bdp_neck_v2_cfg = dict(model_cfg.get("bdp_neck_v2", {}) or {})
+
+        model = RGBTRLSFAGTGACenteredBHLRBDPNeckV2DetectionModel(
+            model_name=str(model_cfg.get("name", "yolo26s")),
+            nc=int(nc),
+            pretrained=bool(pretrained),
+            fusion=fusion,
+            fusion_indices=fusion_indices,
+            align_mode=str(model_cfg.get("align_mode", "bilinear")),
+            names=names,
+            semantic_imgsz=int(data_cfg.get("rgb_semantic_imgsz", 640)),
+            rlsfa_gtga_centered_cfg=align_cfg,
+            rlsfa_gtga_centered_loss_cfg=align_loss_cfg,
+            bhlr_enabled=bool(bhlr_cfg.get("enabled", True)),
+            bhlr_scales=bhlr_cfg.get("scales", [3]),
+            bhlr_layers=bhlr_cfg.get("layers", None),
+            high_to_semantic_ratio=int(bhlr_cfg.get("high_to_semantic_ratio", 3)),
+            detail_channels=int(bhlr_cfg.get("detail_channels", 48)),
+            stem_channels=int(bhlr_cfg.get("stem_channels", 16)),
+            guide_channels=int(bhlr_cfg.get("guide_channels", 24)),
+            bhlr_guidance_mode=str(bhlr_cfg.get("guidance_mode", "alignment")),
+            bhlr_detach_alignment_guidance=bool(
+                bhlr_cfg.get("detach_alignment_guidance", True)
+            ),
+            bdp_neck_v2_cfg=bdp_neck_v2_cfg,
+            verbose=verbose,
+        )
+
     elif variant in {
         "rlsfa_gtga_centered_bhlr_v2",
         "rlsfa_gtga_centered",

@@ -1,0 +1,226 @@
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  export PYTHONHASHSEED=0
+  export CUBLAS_WORKSPACE_CONFIG=:4096:8
+  export CUDA_LAUNCH_BLOCKING=0
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640_bdp_neck_v2.yaml \
+    > logs/yolo26m_uavcb_fixed_bdp_neck_v2_0.log 2>&1 &
+  echo $! > pid/yolo26m_uavcb_fixed_bdp_neck_v2_0.pid
+  tail -f logs/yolo26m_uavcb_fixed_bdp_neck_v2_0.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2_bdp_neck_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_BDPNeckV2_InternalP3_rgb1920_sem640_tir640_seed0_bs32/weights/best.pt \
+    --split test \
+    --device 1 \
+    --batch 4 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2_bdp_neck_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_BDPNeckV2_InternalP3_rgb1920_sem640_tir640_seed0_bs32/weights/best.pt \
+    --split test \
+    --device 0 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25 \
+    --iou 0.70 \
+    --canvas 1200
+  
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python eval_alignment_iou_displacement_GMLS_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2_bdp_neck_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_BDPNeckV2_InternalP3_rgb1920_sem640_tir640_seed0_bs32/weights/best.pt \
+    --device 1 \
+    --batch 4 \
+    --workers 4 \
+    --save-dir runs/alignment_iou_UAV-CB
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  mkdir -p logs pid
+  nohup python -u resume_stage2_ddp.py \
+    --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640_bdp_neck_v2.yaml \
+    --resume /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2_bdp_neck_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_BDPNeckV2_InternalP3_rgb1920_sem640_tir640_seed0_bs32/weights/stage2_last.pt \
+    > logs/yolo26m_uavcb_bdp_neck_v2_resume.log 2>&1 &
+  echo $! > pid/yolo26m_uavcb_bdp_neck_v2_resume.pid
+  tail -f logs/yolo26m_uavcb_bdp_neck_v2_resume.log
+
+model:
+  variant: rlsfa_gtga_centered_bhlr_bdp_neck_v2
+  name: yolo26m
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+
+  # ----------------------------------------------------------
+  # Historical fixed GMLS-v2 + DMLS correction + Fine + Scale
+  # ----------------------------------------------------------
+  rlsfa_gtga_centered:
+    enabled: true
+    type: rlsfa_gtga_centered
+
+    reference_scale: 3
+    apply_scales: [3, 4, 5]
+    hidden_channels: 32
+
+    coarse_radius: 20
+    coarse_temperature: 0.10
+    use_targetness_for_correlation: true
+
+    coarse_local_soft_enabled: false
+    coarse_local_radius: 6
+    coarse_local_temperature: 0.10
+
+    coarse_gmls_enabled: true
+    coarse_gmls_topk: 3
+    coarse_gmls_nms_radius: 4
+    coarse_gmls_aggregation_temperature: 0.12
+    coarse_gmls_global_prior: 0.60
+    coarse_gmls_feature_weight: 0.65
+    coarse_gmls_target_weight: 0.35
+
+    gmls_v2_correction_enabled: true
+    gmls_v2_quality_hidden: 32
+    gmls_v2_route_logit_margin: 0.20
+
+    fine_translation_enabled: true
+    fine_translation_radius: 2
+    fine_translation_temperature: 0.05
+
+    anchor_power: 4.0
+    moment_power: 2.0
+    local_window_sigma: 0.10
+
+    moment_border_margin: 2
+    sigma_min: 0.005
+    scale_min: 0.50
+    scale_max: 3.00
+
+    padding_mode: border
+    align_corners: true
+
+    reliability_gate:
+      enabled: false
+
+  # ----------------------------------------------------------
+  # BHLR-v2: unchanged, P3 only
+  # ----------------------------------------------------------
+  bhlr:
+    enabled: true
+    scales: [3]
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+
+  # ----------------------------------------------------------
+  # BDP-Neck v2
+  #
+  # YOLO26m native head:
+  #   layer 14: Upsample
+  #   layer 15: Concat(top-down P3, backbone P3)
+  #   layer 16: C3k2 -> final P3
+  #
+  # Runtime code does NOT hard-code layer 16; it infers the P3 source from
+  # the Detect graph and injects immediately before that native P3 block.
+  #
+  # N3_pre' = N3_pre + gain * Gate(N3_pre, D3) * Proj(D3)
+  # P3_final = Native_C3k2(N3_pre')
+  #
+  # gain(init)=0, so initial model is EXACTLY the original neck.
+  # ----------------------------------------------------------
+  bdp_neck_v2:
+    enabled: true
+    scale: 3
+    hidden_channels: 64
+    gate_enabled: true
+    max_gain: 0.25
+
+  # Keep DUCF disabled.
+  ducf:
+    enabled: false
+
+# ============================================================
+# Dataset
+# ============================================================
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+
+# ============================================================
+# Training: unchanged from historical fixed baseline
+# ============================================================
+train:
+  device: "0,4"
+  batch: 32
+  batch_mode: global
+  workers: 4
+  epochs: 300
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+  patience: 50
+  early_stop_min_delta: 0.000001
+  resume: null
+
+  stage2:
+    enabled: true
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 0.000001
+
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  alignment:
+    enabled: true
+    lambda_alignment: 0.20
+    lambda_anchor: 1.00
+    lambda_coarse: 1.00
+    lambda_scale: 1.00
+    lambda_targetness: 0.20
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+    clamp_gt_translation: true
+
+    lambda_v2_quality: 0.25
+    lambda_v2_route: 0.10
+    v2_quality_iou_weight: 0.80
+    v2_quality_advantage: 0.05
+    v2_route_target_temperature: 0.05
+
+output:
+  project: runs/rlsfa_gtga_bhlr_gmls_v2_bdp_neck_v2
+  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_BDPNeckV2_InternalP3_rgb1920_sem640_tir640_seed0_bs32_0

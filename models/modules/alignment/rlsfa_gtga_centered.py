@@ -120,150 +120,6 @@ class TargetMapHead(nn.Module):
         return self.net(x)
 
 
-class AdaptiveBoundedScalar(nn.Module):
-    """Predict one bounded per-image scalar while preserving a chosen baseline.
-
-    The final layer is zero-initialized and its bias is chosen such that the
-    initial output is exactly ``init_value``.  Therefore enabling this module
-    does not change the historical geometry at initialization.
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        hidden_channels: int,
-        min_value: float,
-        max_value: float,
-        init_value: float,
-    ):
-        super().__init__()
-        lo = float(min_value)
-        hi = float(max_value)
-        init = float(init_value)
-        if not (hi > lo):
-            raise ValueError(f"max_value must exceed min_value, got {lo}, {hi}")
-        if not (lo < init < hi):
-            raise ValueError(
-                f"init_value must lie strictly inside ({lo}, {hi}), got {init}"
-            )
-
-        h = max(4, int(hidden_channels))
-        self.min_value = lo
-        self.max_value = hi
-        self.net = nn.Sequential(
-            nn.Linear(int(in_channels), h),
-            nn.SiLU(inplace=True),
-            nn.Linear(h, 1),
-        )
-
-        # Exact baseline-preserving initialization.
-        ratio = (init - lo) / (hi - lo)
-        bias = math.log(ratio / (1.0 - ratio))
-        nn.init.zeros_(self.net[-1].weight)
-        nn.init.constant_(self.net[-1].bias, bias)
-
-    def forward(self, descriptor: torch.Tensor) -> torch.Tensor:
-        alpha = torch.sigmoid(self.net(descriptor.float()))
-        return self.min_value + (self.max_value - self.min_value) * alpha
-
-
-def _as_batch_scalar(
-    value,
-    batch_size: int,
-    device: torch.device,
-    dtype: torch.dtype,
-    min_value: float = 1e-4,
-) -> torch.Tensor:
-    """Convert a scalar/per-image tensor to [B,1] without breaking gradients."""
-    if torch.is_tensor(value):
-        t = value.to(device=device, dtype=dtype)
-        if t.numel() == 1:
-            t = t.reshape(1, 1).expand(batch_size, 1)
-        elif t.ndim == 1 and t.shape[0] == batch_size:
-            t = t[:, None]
-        elif t.ndim >= 2 and t.shape[0] == batch_size:
-            t = t.reshape(batch_size, -1)[:, :1]
-        else:
-            raise ValueError(
-                f"Cannot interpret adaptive scalar with shape {tuple(t.shape)} "
-                f"for batch={batch_size}"
-            )
-        return t.clamp_min(float(min_value))
-
-    return torch.full(
-        (batch_size, 1),
-        max(float(value), float(min_value)),
-        device=device,
-        dtype=dtype,
-    )
-
-
-def correlation_statistics(
-    logits: torch.Tensor,
-    statistics_temperature: float = 0.10,
-) -> torch.Tensor:
-    """Three GT-free descriptors of correlation-map quality.
-
-    Returns [B,3]:
-      0) peak probability,
-      1) normalized entropy,
-      2) top1-top2 probability margin.
-    """
-    if logits.ndim != 2:
-        raise ValueError(f"logits must be [B,K], got {tuple(logits.shape)}")
-
-    t = max(float(statistics_temperature), 1e-4)
-    prob = torch.softmax(logits.float() / t, dim=1)
-    peak = prob.max(dim=1).values
-    entropy = -(prob * prob.clamp_min(1e-8).log()).sum(dim=1)
-    entropy = entropy / max(math.log(max(int(prob.shape[1]), 2)), 1e-6)
-
-    if prob.shape[1] >= 2:
-        top2 = torch.topk(prob, k=2, dim=1).values
-        margin = top2[:, 0] - top2[:, 1]
-    else:
-        margin = torch.ones_like(peak)
-
-    return torch.stack((peak, entropy.clamp(0, 1), margin.clamp(0, 1)), dim=1)
-
-
-def softargmax_translation_from_logits(
-    logits: torch.Tensor,
-    search_radius: int,
-    temperature,
-):
-    """Convert full search logits into translation using scalar/per-image T."""
-    if logits.ndim != 2:
-        raise ValueError(f"logits must be [B,K], got {tuple(logits.shape)}")
-    b, k = logits.shape
-    r = int(search_radius)
-    side = 2 * r + 1
-    if k != side * side:
-        raise ValueError(
-            f"Expected {(side * side)} logits for radius={r}, got {k}"
-        )
-
-    temp = _as_batch_scalar(
-        temperature, b, logits.device, logits.dtype, min_value=1e-4
-    )
-    prob = torch.softmax(logits / temp, dim=1)
-
-    disp_y, disp_x = torch.meshgrid(
-        torch.arange(-r, r + 1, device=logits.device, dtype=logits.dtype),
-        torch.arange(-r, r + 1, device=logits.device, dtype=logits.dtype),
-        indexing='ij',
-    )
-    displacement = torch.stack(
-        (disp_x.reshape(-1), disp_y.reshape(-1)), dim=1
-    )
-    expected = prob @ displacement
-
-    maxp = prob.max(1, keepdim=True).values
-    uniform = 1.0 / max(k, 1)
-    confidence = ((maxp - uniform) / max(1.0 - uniform, 1e-6)).clamp(0, 1)
-    return expected.view(-1, 2, 1, 1), confidence.view(-1, 1, 1, 1), prob
-
-
 def resize_mask(mask: Optional[torch.Tensor], reference: torch.Tensor) -> torch.Tensor:
     b, _, h, w = reference.shape
     if mask is None:
@@ -324,49 +180,17 @@ def gaussian_window(
     center: torch.Tensor,
     height: int,
     width: int,
-    sigma=0.10,
+    sigma: float | Tuple[float, float] = 0.10,
 ) -> torch.Tensor:
-    """Gaussian window supporting fixed or per-image sigma.
-
-    ``sigma`` may be:
-      - scalar float,
-      - [B] or [B,1] isotropic tensor,
-      - [B,2] tensor containing (sigma_x, sigma_y),
-      - a two-scalar tuple/list.
-    """
-    b = int(center.shape[0])
-    device = center.device
-    dtype = center.dtype
-
-    if torch.is_tensor(sigma):
-        st = sigma.to(device=device, dtype=dtype)
-        if st.numel() == 1:
-            sx = sy = st.reshape(1, 1, 1, 1).expand(b, 1, 1, 1)
-        elif st.ndim == 1 and st.shape[0] == b:
-            sx = sy = st.view(b, 1, 1, 1)
-        elif st.ndim >= 2 and st.shape[0] == b:
-            flat = st.reshape(b, -1)
-            if flat.shape[1] == 1:
-                sx = sy = flat[:, 0].view(b, 1, 1, 1)
-            else:
-                sx = flat[:, 0].view(b, 1, 1, 1)
-                sy = flat[:, 1].view(b, 1, 1, 1)
-        else:
-            raise ValueError(
-                f"Cannot interpret sigma tensor {tuple(st.shape)} for batch={b}"
-            )
-    elif isinstance(sigma, (tuple, list)):
-        sx = torch.full((b, 1, 1, 1), float(sigma[0]), device=device, dtype=dtype)
-        sy = torch.full((b, 1, 1, 1), float(sigma[1]), device=device, dtype=dtype)
+    if isinstance(sigma, (tuple, list)):
+        sx, sy = float(sigma[0]), float(sigma[1])
     else:
-        sx = sy = torch.full(
-            (b, 1, 1, 1), float(sigma), device=device, dtype=dtype
-        )
-
-    sx = sx.clamp_min(1e-4)
-    sy = sy.clamp_min(1e-4)
-    ys = torch.linspace(0, 1, height, device=device, dtype=dtype)
-    xs = torch.linspace(0, 1, width, device=device, dtype=dtype)
+        sx = sy = float(sigma)
+    sx = max(sx, 1e-4)
+    sy = max(sy, 1e-4)
+    b = int(center.shape[0])
+    ys = torch.linspace(0, 1, height, device=center.device, dtype=center.dtype)
+    xs = torch.linspace(0, 1, width, device=center.device, dtype=center.dtype)
     yy, xx = torch.meshgrid(ys, xs, indexing='ij')
     xx = xx.view(1, 1, height, width)
     yy = yy.view(1, 1, height, width)
@@ -379,7 +203,7 @@ def local_target_distribution(
     targetness: torch.Tensor,
     center: torch.Tensor,
     valid_mask: torch.Tensor,
-    window_sigma,
+    window_sigma: float,
     power: float,
     eps: float = 1e-6,
 ):
@@ -454,12 +278,14 @@ def correlation_translation(
         den = weight.sum((-2, -1)).clamp_min(1e-6)
         scores.append((corr * weight).sum((-2, -1)) / den)
     logits = torch.cat(scores, dim=1)
-    expected, confidence, prob = softargmax_translation_from_logits(
-        logits=logits,
-        search_radius=r,
-        temperature=temperature,
-    )
-    return expected, confidence, prob, logits
+    prob = torch.softmax(logits / max(float(temperature), 1e-4), dim=1)
+    disp = torch.tensor(displacements, device=prob.device, dtype=prob.dtype)
+    expected = prob @ disp
+    k = int(prob.shape[1])
+    maxp = prob.max(1, keepdim=True).values
+    uniform = 1.0 / max(k, 1)
+    confidence = ((maxp - uniform) / max(1.0 - uniform, 1e-6)).clamp(0, 1)
+    return expected.view(-1, 2, 1, 1), confidence.view(-1, 1, 1, 1), prob, logits
 
 
 def dominant_mode_local_softargmax(
@@ -512,10 +338,10 @@ def dominant_mode_local_softargmax(
         )
 
     br = max(0, int(basin_radius))
+    temp = max(float(temperature), 1e-4)
     b = int(logits.shape[0])
     device = logits.device
     dtype = logits.dtype
-    temp = _as_batch_scalar(temperature, b, device, dtype, min_value=1e-4)
 
     # Dominant mode is used ONLY to choose the basin center.
     peak_index = logits.argmax(dim=1)
@@ -599,10 +425,10 @@ def distinct_local_soft_modes(
     k = max(1, min(int(topk), n))
     nr = max(0, int(nms_radius))
     br = max(0, int(basin_radius))
+    temp = max(float(temperature), 1e-4)
 
     b = int(logits.shape[0])
     device, dtype = logits.device, logits.dtype
-    temp = _as_batch_scalar(temperature, b, device, dtype, min_value=1e-4)
     score_map = logits.view(b, 1, side, side)
 
     if nr > 0:
@@ -637,7 +463,7 @@ def distinct_local_soft_modes(
     )
     mode_masks = masks_2d.reshape(b, k, n)
 
-    scaled = logits[:, None, :] / temp.view(b, 1, 1)
+    scaled = logits[:, None, :] / temp
     neg_large = torch.finfo(dtype).min
     local_logits = scaled.masked_fill(~mode_masks, neg_large)
     mode_probabilities = torch.softmax(local_logits, dim=-1)
@@ -1015,17 +841,15 @@ def fine_residual_translation(
     reference_valid_mask: Optional[torch.Tensor] = None,
     source_valid_mask: Optional[torch.Tensor] = None,
     align_corners: bool = True,
-    adaptive_temperature_head: Optional[nn.Module] = None,
-    detach_statistics: bool = True,
-    return_temperature: bool = False,
 ):
-    """Small residual translation search around the coarse result.
+    """Small residual translation search around the coarse RLSFA result.
 
-    If ``adaptive_temperature_head`` is supplied, the correlation logits are
-    computed once, three GT-free correlation descriptors are extracted, and a
-    bounded per-image temperature is predicted.  With the predictor's
-    baseline-preserving initialization this is exactly the historical fixed-T
-    behavior at initialization.
+    Coarse offset and residual offset are both expressed in feature pixels
+    under the same inverse-sampling convention q = p + d.
+
+    A temporary coarse-only sampling of the projected TIR feature is used only
+    to estimate the residual displacement.  The actual output pyramid is still
+    warped once, later, with the composed final geometry.
     """
     if reference.shape[-2:] != source.shape[-2:]:
         source = F.interpolate(
@@ -1049,6 +873,7 @@ def fine_residual_translation(
         b, 2, device=source.device, dtype=source.dtype
     )
 
+    # Estimation-only coarse sampling.  This is NOT fed to the final output.
     coarse_source = warp_with_geometry(
         source,
         identity_scale,
@@ -1069,8 +894,6 @@ def fine_residual_translation(
     )
     coarse_valid = (coarse_valid >= 0.999).to(dtype=reference.dtype)
 
-    # Compute the expensive correlation map once.  The initial fixed-T readout
-    # is retained as fallback and also gives us the raw logits.
     residual, confidence, prob, logits = correlation_translation(
         reference=reference,
         source=coarse_source,
@@ -1081,29 +904,8 @@ def fine_residual_translation(
         source_valid_mask=coarse_valid,
     )
 
-    used_temperature = torch.full(
-        (b, 1), float(temperature),
-        device=logits.device,
-        dtype=logits.dtype,
-    )
-
-    if adaptive_temperature_head is not None:
-        stats = correlation_statistics(logits)
-        if detach_statistics:
-            stats = stats.detach()
-        used_temperature = adaptive_temperature_head(stats).to(dtype=logits.dtype)
-        residual, confidence, prob = softargmax_translation_from_logits(
-            logits=logits,
-            search_radius=int(radius),
-            temperature=used_temperature,
-        )
-
     refined = coarse_offset.float() + residual.float()
-    output = (refined, residual, confidence, prob, logits)
-    if return_temperature:
-        return output + (used_temperature,)
-    return output
-
+    return refined, residual, confidence, prob, logits
 
 def build_direct_sampling_grid(
     sampling_scale: torch.Tensor,
@@ -1171,10 +973,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
         gmls_v2_quality_hidden: int = 32,
         gmls_v2_route_logit_margin: float = 0.20,
 
-        # Adaptive versions of Fine T and Local-GTGA sigma only.
-        # GMLS/DMLS coarse readout stays EXACTLY on the proven fixed parameters.
-        adaptive_parameters_cfg: Optional[Dict[str, Any]] = None,
-
         fine_translation_enabled: bool = False,
         fine_translation_radius: int = 2,
         fine_translation_temperature: float = 0.05,
@@ -1234,48 +1032,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
         self.use_targetness_for_correlation = bool(use_targetness_for_correlation)
         self.padding_mode = str(padding_mode)
         self.align_corners = bool(align_corners)
-
-        # --------------------------------------------------------------
-        # Adaptive geometry parameters.
-        # --------------------------------------------------------------
-        acfg = dict(adaptive_parameters_cfg or {})
-        self.adaptive_parameters_enabled = bool(acfg.get('enabled', False))
-        self.adaptive_hidden_channels = max(4, int(acfg.get('hidden_channels', 16)))
-        self.adaptive_detach_statistics = bool(acfg.get('detach_statistics', True))
-
-        fcfg = dict(acfg.get('fine_temperature', {}) or {})
-        scfg = dict(acfg.get('local_window_sigma', {}) or {})
-
-        # Deliberately disabled in this variant.  Keeping the attribute avoids
-        # breaking debug/checkpoint helper code, but no parameters are created.
-        # Both GMLS and DMLS use the historical fixed coarse_local_temperature.
-        self.adaptive_dmls_temperature_head = None
-
-        self.adaptive_fine_temperature_head = None
-        if (
-            self.adaptive_parameters_enabled
-            and bool(fcfg.get('enabled', True))
-            and self.fine_translation_enabled
-            and self.fine_translation_radius > 0
-        ):
-            self.adaptive_fine_temperature_head = AdaptiveBoundedScalar(
-                in_channels=3,
-                hidden_channels=self.adaptive_hidden_channels,
-                min_value=float(fcfg.get('min', 0.02)),
-                max_value=float(fcfg.get('max', 0.10)),
-                init_value=float(fcfg.get('init', self.fine_translation_temperature)),
-            )
-
-        self.adaptive_local_sigma_head = None
-        if self.adaptive_parameters_enabled and bool(scfg.get('enabled', True)):
-            self.adaptive_local_sigma_head = AdaptiveBoundedScalar(
-                in_channels=5,
-                hidden_channels=self.adaptive_hidden_channels,
-                min_value=float(scfg.get('min', 0.04)),
-                max_value=float(scfg.get('max', 0.16)),
-                init_value=float(scfg.get('init', self.local_window_sigma)),
-            )
-
         self.rgb_proj = LazyProjection(c)
         self.tir_proj = LazyProjection(c)
         self.rgb_target_head = TargetMapHead(c)
@@ -1336,37 +1092,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
         )
 
         # --------------------------------------------------------------
-        # Fixed coarse + adaptive scale-window policy.
-        #
-        # IMPORTANT: GMLS and DMLS retain the EXACT proven fixed local
-        # temperature.  Only the later Fine stage and Local-GTGA window are
-        # adaptive in this variant.  This prevents the adaptive heads from
-        # perturbing the coarse correlation curriculum / GMLS candidate set.
-        # --------------------------------------------------------------
-        coarse_stats = correlation_statistics(coarse_corr_logits)
-        coarse_local_temperature_used = self.coarse_local_temperature
-
-        # Target-spread descriptor is available before Local-GTGA and therefore
-        # does not create a circular dependence on local_window_sigma.
-        coarse_target_sigma = centered_sigma(
-            coarse_anchor_distribution,
-            coarse_anchor,
-            sigma_min=1e-6,
-        )
-        sigma_descriptor = torch.cat(
-            (coarse_stats, coarse_target_sigma.float()), dim=1
-        )
-        if self.adaptive_detach_statistics:
-            sigma_descriptor = sigma_descriptor.detach()
-
-        if self.adaptive_local_sigma_head is not None:
-            local_window_sigma_used = self.adaptive_local_sigma_head(
-                sigma_descriptor
-            )
-        else:
-            local_window_sigma_used = self.local_window_sigma
-
-        # --------------------------------------------------------------
         # Coarse readout hierarchy:
         #   GMLS (new) > DMLS (single local mode) > historical global soft.
         # --------------------------------------------------------------
@@ -1416,7 +1141,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
                 mode_topk=self.coarse_gmls_topk,
                 mode_nms_radius=self.coarse_gmls_nms_radius,
                 local_basin_radius=self.coarse_local_radius,
-                # Keep GMLS EXACTLY on the proven fixed coarse settings.
                 local_temperature=self.coarse_local_temperature,
                 aggregation_temperature=self.coarse_gmls_aggregation_temperature,
                 global_prior=self.coarse_gmls_global_prior,
@@ -1511,10 +1235,7 @@ class RLSFAGTGAScaleUnit(nn.Module):
         # dbg['coarse_offset'] below becomes the FINAL coarse+fine offset,
         # so the existing Smooth-L1 translation supervision trains it.
         if self.fine_translation_enabled and self.fine_translation_radius > 0:
-            (
-                offset, fine_offset, fine_conf, fine_prob, fine_corr_logits,
-                fine_translation_temperature_used,
-            ) = fine_residual_translation(
+            offset, fine_offset, fine_conf, fine_prob, fine_corr_logits = fine_residual_translation(
                 reference=r,
                 source=t,
                 weight_map=coarse_weight,
@@ -1524,9 +1245,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
                 reference_valid_mask=rgb_valid,
                 source_valid_mask=tir_valid,
                 align_corners=self.align_corners,
-                adaptive_temperature_head=self.adaptive_fine_temperature_head,
-                detach_statistics=self.adaptive_detach_statistics,
-                return_temperature=True,
             )
         else:
             offset = coarse_offset
@@ -1534,12 +1252,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
             fine_conf = torch.ones_like(coarse_conf)
             fine_prob = None
             fine_corr_logits = None
-            fine_translation_temperature_used = torch.full(
-                (offset.shape[0], 1),
-                self.fine_translation_temperature,
-                device=offset.device,
-                dtype=offset.dtype,
-            )
 
         _, _, h, w = rgb_target_raw.shape
         dx = offset[:, 0, 0, 0]
@@ -1553,11 +1265,11 @@ class RLSFAGTGAScaleUnit(nn.Module):
 
         rgb_dist, rgb_window, rgb_local_target = local_target_distribution(
             rgb_target_raw, coarse_anchor, rgb_safe,
-            local_window_sigma_used, self.moment_power,
+            self.local_window_sigma, self.moment_power,
         )
         tir_dist, tir_window, tir_local_target = local_target_distribution(
             tir_target_raw, source_center_for_stats, tir_safe,
-            local_window_sigma_used, self.moment_power,
+            self.local_window_sigma, self.moment_power,
         )
         rgb_sigma = centered_sigma(rgb_dist, coarse_anchor, self.sigma_min)
         tir_sigma = centered_sigma(tir_dist, source_center_for_stats, self.sigma_min)
@@ -1606,31 +1318,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
             'coarse_local_soft_enabled': self.coarse_local_soft_enabled,
             'coarse_local_radius': self.coarse_local_radius,
             'coarse_local_temperature': self.coarse_local_temperature,
-            'adaptive_parameters_enabled': self.adaptive_parameters_enabled,
-            'adaptive_coarse_enabled': False,
-            # Compatibility key: fixed in this variant (not adaptive).
-            'adaptive_coarse_local_temperature': (
-                coarse_local_temperature_used
-                if torch.is_tensor(coarse_local_temperature_used)
-                else torch.full(
-                    (coarse_corr_logits.shape[0], 1),
-                    float(coarse_local_temperature_used),
-                    device=coarse_corr_logits.device,
-                    dtype=coarse_corr_logits.dtype,
-                )
-            ),
-            'adaptive_local_window_sigma': (
-                local_window_sigma_used
-                if torch.is_tensor(local_window_sigma_used)
-                else torch.full(
-                    (coarse_corr_logits.shape[0], 1),
-                    float(local_window_sigma_used),
-                    device=coarse_corr_logits.device,
-                    dtype=coarse_corr_logits.dtype,
-                )
-            ),
-            'coarse_correlation_statistics': coarse_stats,
-            'coarse_target_sigma_for_adaptation': coarse_target_sigma,
             'coarse_basin_mask': coarse_basin_mask,
             'coarse_peak_offset': coarse_peak_offset,
             'coarse_peak_index': coarse_peak_index,
@@ -1703,8 +1390,6 @@ class RLSFAGTGAScaleUnit(nn.Module):
 
             'fine_translation_enabled': self.fine_translation_enabled,
             'fine_translation_radius': self.fine_translation_radius,
-            'fine_translation_temperature': self.fine_translation_temperature,
-            'adaptive_fine_translation_temperature': fine_translation_temperature_used,
             'fine_offset': fine_offset,
             'fine_correlation_confidence': fine_conf,
             'fine_probability': fine_prob,
@@ -1852,10 +1537,6 @@ class RLSFAGTGACenteredAlignment(BaseAlignment):
             gmls_v2_quality_hidden=int(self.cfg.get('gmls_v2_quality_hidden', 32)),
             gmls_v2_route_logit_margin=float(self.cfg.get('gmls_v2_route_logit_margin', 0.20)),
 
-            adaptive_parameters_cfg=dict(
-                self.cfg.get('adaptive_parameters', {}) or {}
-            ),
-
             fine_translation_enabled=bool(self.cfg.get('fine_translation_enabled', False)),
             fine_translation_radius=int(self.cfg.get('fine_translation_radius', 2)),
             fine_translation_temperature=float(self.cfg.get('fine_translation_temperature', 0.05)),
@@ -1966,11 +1647,6 @@ class RLSFAGTGACenteredAlignment(BaseAlignment):
             # DMLS diagnostics at alignment-info level.
             'coarse_local_soft_enabled': bool(self.unit.coarse_local_soft_enabled),
             'coarse_local_radius': int(self.unit.coarse_local_radius),
-            'adaptive_parameters_enabled': bool(self.unit.adaptive_parameters_enabled),
-            'adaptive_coarse_enabled': False,
-            'adaptive_coarse_local_temperature': geometry['adaptive_coarse_local_temperature'],
-            'adaptive_fine_translation_temperature': geometry['adaptive_fine_translation_temperature'],
-            'adaptive_local_window_sigma': geometry['adaptive_local_window_sigma'],
             'coarse_offset_global_soft': geometry['coarse_offset_global_soft'],
             'coarse_probability_global': geometry['coarse_probability_global'],
             'coarse_peak_offset': geometry['coarse_peak_offset'],
@@ -2031,9 +1707,6 @@ __all__ = [
     "RLSFAGTGACenteredAlignment",
     "RLSFAGTGAAlignment",
     "RLSFAGTGAScaleUnit",
-    "AdaptiveBoundedScalar",
-    "correlation_statistics",
-    "softargmax_translation_from_logits",
     "build_direct_sampling_grid",
     "warp_with_geometry",
     "correlation_translation",
