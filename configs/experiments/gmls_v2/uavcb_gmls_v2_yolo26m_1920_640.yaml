@@ -4,16 +4,16 @@ traincc:
   mkdir -p logs pid
   nohup python -u train_rlsfa_gtga_bhlr_v2.py \
     --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640.yaml \
-    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew 2>&1 &
-  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew.pid
-  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew.log
+    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.log 2>&1 &
+  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.pid
+  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.log
 
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python val_rlsfa_gtga_bhlr_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new/weights/best.pt \
     --split test \
-    --device 2 \
+    --device 0 \
     --batch 4 \
     --workers 4 \
     --conf 0.001 \
@@ -23,9 +23,9 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new/weights/best.pt \
     --split test \
-    --device 2 \
+    --device 0 \
     --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
     --conf 0.25 \
     --iou 0.70 \
@@ -34,8 +34,8 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python eval_alignment_iou_displacement_GMLS_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew/weights/best.pt \
-    --device 1 \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new/weights/best.pt \
+    --device 0 \
     --batch 4 \
     --workers 4 \
     --save-dir runs/alignment_iou_UAV-CB
@@ -44,7 +44,7 @@ model:
   variant: rlsfa_gtga_centered_bhlr_v2
   name: yolo26m
   nc: 1
-  pretrained: true
+  pretrained: ture
   fusion: add
   align_mode: bilinear
 
@@ -163,7 +163,7 @@ data:
 # Training
 # ============================================================
 train:
-  device: "0,5"
+  device: "5,6"
   batch: 32
   batch_mode: global
   workers: 4
@@ -221,4 +221,4 @@ loss:
 
 output:
   project: runs/rlsfa_gtga_bhlr_gmls_v2
-  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew
+  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new
