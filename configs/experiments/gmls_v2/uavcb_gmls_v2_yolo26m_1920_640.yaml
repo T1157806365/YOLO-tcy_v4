@@ -4,9 +4,9 @@ traincc:
   mkdir -p logs pid
   nohup python -u train_rlsfa_gtga_bhlr_v2.py \
     --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640.yaml \
-    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.log 2>&1 &
-  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.pid
-  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new.log
+    > logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new_640.log 2>&1 &
+  echo $! > pid/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new_640.pid
+  tail -f logs/yolo26m_uavcb_gmls_v2_scratch_bs32_r6_bhlrnew_new_640.log
 
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
@@ -163,7 +163,7 @@ data:
 # Training
 # ============================================================
 train:
-  device: "5,6"
+  device: "0,6"
   batch: 32
   batch_mode: global
   workers: 4
@@ -221,4 +221,4 @@ loss:
 
 output:
   project: runs/rlsfa_gtga_bhlr_gmls_v2
-  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new
+  name: yolo26m_UAVCB_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_scratch_bs32_r6_bhlrnew_new_640
