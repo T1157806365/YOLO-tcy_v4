@@ -1,0 +1,116 @@
+model:
+  variant: rlsfa_gtga_centered_bhlr_v2
+  name: yolo26m
+  nc: 1
+  pretrained: true
+  fusion: add
+  align_mode: bilinear
+  rlsfa_gtga_centered:
+    enabled: true
+    type: rlsfa_gtga_centered
+    reference_scale: 3
+    apply_scales:
+    - 3
+    - 4
+    - 5
+    hidden_channels: 32
+    coarse_radius: 20
+    coarse_temperature: 0.1
+    use_targetness_for_correlation: true
+    coarse_local_soft_enabled: false
+    coarse_local_radius: 6
+    coarse_local_temperature: 0.1
+    coarse_gmls_enabled: true
+    coarse_gmls_topk: 3
+    coarse_gmls_nms_radius: 4
+    coarse_gmls_aggregation_temperature: 0.12
+    coarse_gmls_global_prior: 0.6
+    coarse_gmls_feature_weight: 0.65
+    coarse_gmls_target_weight: 0.35
+    gmls_v2_correction_enabled: true
+    gmls_v2_quality_hidden: 32
+    gmls_v2_route_logit_margin: 0.2
+    fine_translation_enabled: true
+    fine_translation_radius: 2
+    fine_translation_temperature: 0.05
+    anchor_power: 4.0
+    moment_power: 2.0
+    local_window_sigma: 0.1
+    moment_border_margin: 2
+    sigma_min: 0.005
+    scale_min: 0.5
+    scale_max: 3.0
+    padding_mode: border
+    align_corners: true
+    reliability_gate:
+      enabled: false
+  bhlr:
+    enabled: true
+    scales:
+    - 3
+    high_to_semantic_ratio: 3
+    detail_channels: 48
+    stem_channels: 16
+    guide_channels: 24
+    guidance_mode: alignment
+    detach_alignment_guidance: true
+data:
+  rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-RGB.yaml
+  tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-TIR.yaml
+  rgb_imgsz: 1920
+  rgb_semantic_imgsz: 640
+  tir_imgsz: 640
+  pair_mode: relative
+train:
+  device: 0,4
+  batch: 32
+  batch_mode: global
+  workers: 4
+  epochs: 60
+  optimizer: SGD
+  lr0: 0.01
+  lrf: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  amp: true
+  seed: 0
+  deterministic: true
+  grad_clip: 10.0
+  patience: 20
+  early_stop_min_delta: 1.0e-06
+  resume: null
+  stage2:
+    enabled: false
+    epochs: 200
+    lr0: 0.001
+    lrf: 0.01
+    patience: 50
+    early_stop_min_delta: 1.0e-06
+augment:
+  fliplr: 0.5
+  flipud: 0.0
+loss:
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+  alignment:
+    enabled: true
+    lambda_alignment: 0.2
+    lambda_anchor: 1.0
+    lambda_coarse: 1.0
+    lambda_scale: 1.0
+    lambda_targetness: 0.2
+    smooth_l1_beta: 1.0
+    targetness_alpha: 0.75
+    targetness_gamma: 2.0
+    gtga_gaussian_sigma_factor: 0.25
+    gtga_gaussian_sigma_min_px: 1.0
+    clamp_gt_translation: true
+    lambda_v2_quality: 0.25
+    lambda_v2_route: 0.1
+    v2_quality_iou_weight: 0.8
+    v2_quality_advantage: 0.05
+    v2_route_target_temperature: 0.05
+output:
+  project: runs/p3_product_residual_screen
+  name: yolo26m_UAVCB_best20261021_S0_baseline

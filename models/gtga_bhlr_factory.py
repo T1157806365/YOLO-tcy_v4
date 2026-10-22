@@ -418,10 +418,16 @@ def build_model_from_config(
     elif variant in {
         "rlsfa_gtga_centered_bhlr_v2",
         "rlsfa_gtga_centered",
+        "rlsfa_gtga_centered_bhlr_p3_residual_v1",
     }:
-        from models.rgbt_rlsfa_gtga_centered_bhlr_model import (
-            RGBTRLSFAGTGACenteredBHLRV2DetectionModel,
-        )
+        if variant == "rlsfa_gtga_centered_bhlr_p3_residual_v1":
+            from models.rgbt_rlsfa_gtga_centered_bhlr_p3_residual_model import (
+                RGBTP3ProductResidualDetectionModel as RGBTRLSFAGTGACenteredBHLRV2DetectionModel,
+            )
+        else:
+            from models.rgbt_rlsfa_gtga_centered_bhlr_model import (
+                RGBTRLSFAGTGACenteredBHLRV2DetectionModel,
+            )
 
         align_cfg = dict(
             model_cfg.get(
@@ -445,6 +451,13 @@ def build_model_from_config(
         bhlr_cfg = dict(
             model_cfg.get("bhlr", {})
             or {}
+        )
+
+        # Extra constructor argument is supplied ONLY for the new variant.
+        # The original baseline model constructor is unchanged.
+        p3_extra_cfg = (
+            {"p3_residual_cfg": dict(model_cfg.get("p3_residual", {}) or {})}
+            if variant == "rlsfa_gtga_centered_bhlr_p3_residual_v1" else {}
         )
 
         model = RGBTRLSFAGTGACenteredBHLRV2DetectionModel(
@@ -541,6 +554,7 @@ def build_model_from_config(
                 )
                 or {}
             ),
+            **p3_extra_cfg,
             verbose=verbose,
         )
 
