@@ -396,10 +396,6 @@ class RGBTRLSFAGTGACenteredBHLRV2DetectionModel(RGBTDetectionModel):
             meta = ratio_pads[bi]
             if not isinstance(meta, Mapping):
                 return None
-            # YOLO_TCY_STRETCH_NO_PAD_V1: all pixels are valid after stretch.
-            if meta.get("stretch", False):
-                mask[bi, 0] = 1.0
-                continue
             ratio = float(meta["ratio"])
             left, top = map(int, meta["pad"])
             rw = int(round(int(ori_w) * ratio))
@@ -482,15 +478,9 @@ class RGBTRLSFAGTGACenteredBHLRV2DetectionModel(RGBTDetectionModel):
         raw_tir = list(self.forward_tir_backbone(tir))
 
         if rgb_valid_mask is None:
-            # YOLO_TCY_STRETCH_NO_PAD_V1: no padded border is present.
-            rgb_valid_mask = rgb_semantic.new_ones(
-                (rgb_semantic.shape[0], 1, *rgb_semantic.shape[-2:]), dtype=torch.float32
-            )
+            rgb_valid_mask = self._infer_valid_mask_from_pixels(rgb_semantic)
         if tir_valid_mask is None:
-            # YOLO_TCY_STRETCH_NO_PAD_V1: no padded border is present.
-            tir_valid_mask = tir.new_ones(
-                (tir.shape[0], 1, *tir.shape[-2:]), dtype=torch.float32
-            )
+            tir_valid_mask = self._infer_valid_mask_from_pixels(tir)
 
         need_align_debug = bool(
             return_alignment_debug
