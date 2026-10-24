@@ -1,5 +1,46 @@
+traincc:
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  mkdir -p logs pid
+  nohup python -u train_rlsfa_gtga_bhlr_v2.py \
+    --cfg configs/experiments/gmls_v2/uavcb_gmls_v2_yolo26m_1920_640_lcadd_p345.yaml \
+    > logs/yolo26m_UAVCB_LCADD_P345_seed0_bs32.log 2>&1 &
+  echo $! > pid/yolo26m_UAVCB_LCADD_P345_seed0_bs32.pid
+  tail -f logs/yolo26m_UAVCB_LCADD_P345_seed0_bs32.log
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python val_rlsfa_gtga_bhlr_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_light_confadd/yolo26m_UAVCB_LCADD_P345_seed0_bs32/weights/best.pt \
+    --split test \
+    --device 0 \
+    --batch 4 \
+    --workers 4 \
+    --conf 0.001 \
+    --iou 0.70 \
+    --plots
+
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_light_confadd/yolo26m_UAVCB_LCADD_P345_seed0_bs32/weights/best.pt \
+    --split test \
+    --device 1 \
+    --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
+    --conf 0.25 \
+    --iou 0.70 \
+    --canvas 1200
+  
+  conda activate tcy
+  cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
+  python eval_alignment_iou_displacement_GMLS_v2.py \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_light_confadd/yolo26m_UAVCB_LCADD_P345_seed0_bs32/weights/best.pt \
+    --device 1 \
+    --batch 4 \
+    --workers 4 \
+    --save-dir runs/alignment_iou_UAV-CB
 model:
-  variant: rlsfa_gtga_centered_bhlr_p3_residual_v1
+  variant: rlsfa_gtga_centered_bhlr_light_confadd_v1
   name: yolo26m
   nc: 1
   pretrained: true
@@ -54,11 +95,16 @@ model:
     guide_channels: 24
     guidance_mode: alignment
     detach_alignment_guidance: true
-  p3_residual:
+  confidence_add:
     enabled: true
-    mode: conv
-    hidden_channels: 32
-    max_gain: 0.25
+    scales:
+    - 3
+    - 4
+    - 5
+    max_delta: 0.25
+    kernel_size: 3
+    channel_gate: true
+  init_from_baseline: null
 data:
   rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-RGB.yaml
   tir: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/UAV-CB-TIR.yaml
@@ -67,7 +113,7 @@ data:
   tir_imgsz: 640
   pair_mode: relative
 train:
-  device: 0,4
+  device: 0,6
   batch: 32
   batch_mode: global
   workers: 4
@@ -117,5 +163,5 @@ loss:
     v2_quality_advantage: 0.05
     v2_route_target_temperature: 0.05
 output:
-  project: runs/p3_product_residual_full
-  name: yolo26m_UAVCB_best20261021_S1_conv_residual
+  project: runs/rlsfa_gtga_bhlr_light_confadd
+  name: yolo26m_UAVCB_LCADD_P345_seed0_bs32
