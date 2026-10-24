@@ -163,7 +163,7 @@ data:
 # Training
 # ============================================================
 train:
-  device: "4,6"
+  device: "0,6"
   batch: 32
   batch_mode: global
   workers: 4
