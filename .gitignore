@@ -28,7 +28,6 @@ work_dirs/
 *.engine
 
 # Dataset / large data
-datasets/
 data/
 *.7z
 *.zip
