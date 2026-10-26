@@ -1,0 +1,10 @@
+path: /mnt/sda/taochangyong/Projects/datasets/LRDD_v3_RGBTX
+
+train: TIR/images/train
+val: TIR/images/val
+test: TIR/images/test
+
+nc: 1
+
+names:
+  0: UAV
