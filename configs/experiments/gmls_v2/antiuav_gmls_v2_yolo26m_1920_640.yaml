@@ -4,16 +4,16 @@ traincc:
   mkdir -p logs pid
   nohup python -u train_rlsfa_gtga_bhlr_v2.py \
     --cfg configs/experiments/gmls_v2/antiuav_gmls_v2_yolo26m_1920_640.yaml \
-    > logs/yolo26m_antiuav_gmls_v2_scratch_bs32_r6_bhlrnew.log 2>&1 &
-  echo $! > pid/yolo26m_antiuav_gmls_v2_scratch_bs32_r6_bhlrnew.pid
-  tail -f logs/yolo26m_antiuav_gmls_v2_scratch_bs32_r6_bhlrnew.log
+    > logs/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16.log 2>&1 &
+  echo $! > pid/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16.pid
+  tail -f logs/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16.log
 
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python val_rlsfa_gtga_bhlr_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_bs32_r6_bhlrnew/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16/weights/best.pt \
     --split test \
-    --device 5 \
+    --device 3 \
     --batch 4 \
     --workers 4 \
     --conf 0.001 \
@@ -23,9 +23,9 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python visualize_rlsfa_coarsefine_gtga_bhlr_add.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_bs32_r6_bhlrnew/weights/best.pt \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16/weights/best.pt \
     --split test \
-    --device 5 \
+    --device 3 \
     --indices 0 50 100 150 200 250 300 350 400 450 500 550 600 \
     --conf 0.25 \
     --iou 0.70 \
@@ -34,8 +34,8 @@ traincc:
   conda activate tcy
   cd /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4
   python eval_alignment_iou_displacement_GMLS_v2.py \
-    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_bs32_r6_bhlrnew/weights/best.pt \
-    --device 0 \
+    --weights /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/runs/rlsfa_gtga_bhlr_gmls_v2/yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16/weights/best.pt \
+    --device 3 \
     --batch 4 \
     --workers 4 \
     --save-dir runs/alignment_iou_AntiUAV
@@ -44,59 +44,100 @@ model:
   variant: rlsfa_gtga_centered_bhlr_v2
   name: yolo26m
   nc: 1
-  pretrained: true  # Corrected typo 'ture'; set false for a scratch experiment.
+  pretrained: ture
   fusion: add
   align_mode: bilinear
 
+  # ----------------------------------------------------------
+  # RLSFA coarse translation + fine residual translation
+  # + Local-GTGA centered scale
+  # ----------------------------------------------------------
   rlsfa_gtga_centered:
     enabled: true
     type: rlsfa_gtga_centered
+
     reference_scale: 3
     apply_scales: [3, 4, 5]
     hidden_channels: 32
 
-    # Coarse global translation
+    # Existing coarse translation
     coarse_radius: 20
     coarse_temperature: 0.10
     use_targetness_for_correlation: true
 
-    # DMLS local-soft readout, kept disabled for the GMLS-v2 variant
+    # ========================================================
+    # DMLS-Align v1: ONLY change in the alignment estimator.
+    #
+    # Full 41x41 correlation is still computed.
+    # argmax selects only the dominant basin center.
+    # Final coarse offset = LOCAL soft expectation in 7x7 basin.
+    # ========================================================
     coarse_local_soft_enabled: false
-    coarse_local_radius: 6
-    coarse_local_temperature: 0.10
 
-    # GMLS-v2 candidates and routing
+    # 3 -> 7x7 basin around the dominant mode.
+    # First clean experiment: keep exactly 3.
+    coarse_local_radius: 6
+
+    # Use the same temperature as the historical coarse softmax.
+    coarse_local_temperature: 0.10
+    #原为0.10
+    # ========================================================
+    # GMLS v2 (GMLS primary + DMLS bbox-supervised correction)
+    # Candidate 0 : historical GLOBAL soft offset
+    # Candidate 1-3: three distinct LOCAL-soft modes
+    # Final coarse offset: target-aware SOFT aggregation.
+    # ========================================================
     coarse_gmls_enabled: true
+
+    # Three distinct correlation modes.
     coarse_gmls_topk: 3
+
+    # Suppress adjacent maxima so one physical mode is not repeated.
     coarse_gmls_nms_radius: 4
+
+    # Candidate-level soft aggregation temperature.
     coarse_gmls_aggregation_temperature: 0.12
+
+    # Stability prior: 60% prior mass to historical Global Soft,
+    # 40% shared by local modes according to their correlation mass.
     coarse_gmls_global_prior: 0.60
+
+    # Candidate evidence = 0.65 * localized feature consistency
+    #                    + 0.35 * targetness soft-IoU.
     coarse_gmls_feature_weight: 0.65
     coarse_gmls_target_weight: 0.35
 
+    # The ONLY change to the original GMLS estimator:
+    # predict two candidate qualities and conditionally use the DMLS readout.
+    # The default output is original GMLS, with NO coordinate averaging added.
     gmls_v2_correction_enabled: true
     gmls_v2_quality_hidden: 32
     gmls_v2_route_logit_margin: 0.20
 
-    # Fine translation
+    # NEW: small local residual translation search
     fine_translation_enabled: true
     fine_translation_radius: 2
     fine_translation_temperature: 0.05
 
-    # Local-GTGA scale
+    # Existing Local-GTGA scale
     anchor_power: 4.0
     moment_power: 2.0
     local_window_sigma: 0.10
+
     moment_border_margin: 2
     sigma_min: 0.005
     scale_min: 0.50
     scale_max: 3.00
+
     padding_mode: border
     align_corners: true
 
     reliability_gate:
       enabled: false
 
+  # ----------------------------------------------------------
+  # BHLR-v2: unchanged
+  # ----------------------------------------------------------
   bhlr:
     enabled: true
     scales: [3]
@@ -108,7 +149,7 @@ model:
     detach_alignment_guidance: true
 
 # ============================================================
-# Anti-UAV RGB-T dataset
+# Dataset
 # ============================================================
 data:
   rgb: /mnt/sda/taochangyong/Projects/Model/YOLO-tcy_v4/configs/datasets/Anti-UAV-RGB.yaml
@@ -119,11 +160,11 @@ data:
   pair_mode: relative
 
 # ============================================================
-# Training (same schedule as the supplied UAV-CB configuration)
+# Training
 # ============================================================
 train:
-  device: "0,4"
-  batch: 32
+  device: "4"
+  batch: 16
   batch_mode: global
   workers: 4
   epochs: 300
@@ -156,6 +197,7 @@ loss:
   box: 7.5
   cls: 0.5
   dfl: 1.5
+
   alignment:
     enabled: true
     lambda_alignment: 0.20
@@ -169,6 +211,8 @@ loss:
     gtga_gaussian_sigma_factor: 0.25
     gtga_gaussian_sigma_min_px: 1.0
     clamp_gt_translation: true
+
+    # AMP-safe bbox-supervised quality and selection objectives.
     lambda_v2_quality: 0.25
     lambda_v2_route: 0.10
     v2_quality_iou_weight: 0.80
@@ -177,4 +221,4 @@ loss:
 
 output:
   project: runs/rlsfa_gtga_bhlr_gmls_v2
-  name: yolo26m_AntiUAV_GMLSv2_DMLS-Correction_Fine_Scale_BHLRv2-P3_ADD_rgb1920_sem640_tir640_seed0_bs32_r6_bhlrnew
+  name: yolo26m_AntiUAV_GMLSv2_DMLS_BHLRv2-P3_ADD_rgb1920_seed0_bs16

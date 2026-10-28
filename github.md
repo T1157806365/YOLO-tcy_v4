@@ -6,12 +6,12 @@ git branch --show-current
 git remote -v 
  
 # 基于当前代码创建新的备份分支 
-git switch -c backup-20261026_FigConvAdd
+git switch -c backup-20261028_AGDHv2
  
 # 提交当前所有未被 .gitignore 排除的修改 
 git add . 
  
-git commit -m "Backup YOLO-tcy_v4 20261026_FigConvAdd" 
+git commit -m "Backup YOLO-tcy_v4 20261028_AGDHv2" 
  
 # 上传新分支到 GitHub 
-git push -u origin backup-20261026_FigConvAdd
+git push -u origin backup-20261028_AGDHv2
